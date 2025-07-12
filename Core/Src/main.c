@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "bme68x.h"
+#include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
 /* USER CODE END Includes */
@@ -82,11 +83,11 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+  log_debug("System Initialization Started");
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
-
+  
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
 
@@ -106,87 +107,146 @@ int main(void)
   MX_USART2_UART_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-  if (HAL_I2C_IsDeviceReady(&hi2c1, BME68X_I2C_ADDR << 1, 3, HAL_MAX_DELAY) != HAL_OK) {
-          char err[] = "BME68x not found on I2C bus\r\n";
-          HAL_UART_Transmit(&huart2, (uint8_t*)err, strlen(err), HAL_MAX_DELAY);
-          while(1);
-      }
+  log_debug("GPIO, USART2, I2C1 Initialized");
+  log_debug("Checking for BME68x on I2C bus...");
 
-      char msg[128];
-      snprintf(msg, sizeof(msg), "BME68x found on I2C bus\r\n");
-      HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
-
-      gas_sensor.intf = BME68X_I2C_INTF;
-      gas_sensor.read = user_i2c_read;
-      gas_sensor.write = user_i2c_write;
-      gas_sensor.delay_us = user_delay_us;
-      gas_sensor.intf_ptr = &hi2c1;
-
-      rslt = bme68x_init(&gas_sensor);
-      if (rslt != BME68X_OK) {
-          char err[] = "Sensor initialization failed\r\n";
-          HAL_UART_Transmit(&huart2, (uint8_t*)err, strlen(err), HAL_MAX_DELAY);
-          while (1);
-      }
-
-      uint8_t chip_id = 0;
-      rslt = bme68x_get_regs(BME68X_REG_CHIP_ID, &chip_id, 1, &gas_sensor);
-      snprintf(msg, sizeof(msg), "Chip ID: 0x%02X (Expected: 0x%02X)\r\n", chip_id, BME68X_CHIP_ID);
-      HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
-
-      conf.os_hum = BME68X_OS_2X;
-      conf.os_temp = BME68X_OS_8X;
-      conf.os_pres = BME68X_OS_4X;
-      conf.filter = BME68X_FILTER_SIZE_3;
-      bme68x_set_conf(&conf, &gas_sensor);
-
-      heatr_conf.enable = BME68X_ENABLE;
-      heatr_conf.heatr_temp = 300;
-      heatr_conf.heatr_dur = 100;
-      bme68x_set_heatr_conf(BME68X_FORCED_MODE, &heatr_conf, &gas_sensor);
+  HAL_StatusTypeDef devReady = HAL_I2C_IsDeviceReady(&hi2c1, BME68X_I2C_ADDR << 1, 3, 100);
+  if (devReady != HAL_OK) {
+	log_debug("BME68x NOT FOUND on I2C bus. Halting.");
+    while (1); // Block execution here
+  } else {
+    log_debug("BME68x FOUND on I2C bus");
+  }
+  
+  // Set up sensor interface
+  gas_sensor.intf = BME68X_I2C_INTF;
+  gas_sensor.read = user_i2c_read;
+  gas_sensor.write = user_i2c_write;
+  gas_sensor.delay_us = user_delay_us;
+  gas_sensor.intf_ptr = &hi2c1;
+  
+  log_debug("Initializing BME68x...");
+  rslt = bme68x_init(&gas_sensor);
+  if (rslt != BME68X_OK) {
+	  log_debug("Sensor initialization failed. Halting.");
+      while (1);
+  }
+  
+  uint8_t chip_id = 0;
+  rslt = bme68x_get_regs(BME68X_REG_CHIP_ID, &chip_id, 1, &gas_sensor);
+  if (rslt == BME68X_OK) {
+      char id_msg[64];
+      snprintf(id_msg, sizeof(id_msg), "BME68x Chip ID: 0x%02X (Expected: 0x%02X)", chip_id, BME68X_CHIP_ID);
+      log_debug(id_msg);
+  } else {
+      log_debug("Failed to read Chip ID");
+  }
+  
+  log_debug("Configuring BME68x sensor...");
+  
+  // Oversampling and filter config
+  conf.os_hum = BME68X_OS_2X;
+  conf.os_temp = BME68X_OS_8X;
+  conf.os_pres = BME68X_OS_4X;
+  conf.filter = BME68X_FILTER_SIZE_3;
+  
+  if (bme68x_set_conf(&conf, &gas_sensor) != BME68X_OK)
+      log_debug("Failed to apply sensor config");
+  
+  // Heater configuration
+  heatr_conf.enable = BME68X_ENABLE;
+  heatr_conf.heatr_temp = 300;
+  heatr_conf.heatr_dur = 100;
+  
+  if (bme68x_set_heatr_conf(BME68X_FORCED_MODE, &heatr_conf, &gas_sensor) != BME68X_OK)
+      log_debug("Failed to apply heater config");
+  
+  log_debug("BME68x configuration complete.");
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  const char *intro_msg =
+      "\r\n=== BME68x Sensor Terminal ===\r\n"
+      "Type one of the following commands and press Enter:\r\n"
+      "  temp   - Show Temperature in Celsius\r\n"
+      "  humi   - Show Humidity in %%\r\n"
+      "  press  - Show Pressure in hPa\r\n"
+      "  help   - Show this list again\r\n"
+      "===============================\r\n";
+  HAL_UART_Transmit(&huart2, (uint8_t *)intro_msg, strlen(intro_msg), HAL_MAX_DELAY);
+
+  // Now enter main loop
   while (1)
   {
-    /* USER CODE END WHILE */
+      // Read user command
+      char rx_buffer[32] = {0};
+      uint8_t idx = 0;
+      char ch;
 
-    /* USER CODE BEGIN 3 */
-	  rslt = bme68x_set_op_mode(BME68X_FORCED_MODE, &gas_sensor);
-	          if (rslt != BME68X_OK) {
-	              char err[] = "Set op mode failed\r\n";
-	              HAL_UART_Transmit(&huart2, (uint8_t*)err, strlen(err), HAL_MAX_DELAY);
-	              continue;
-	          }
+      while (1) {
+          HAL_UART_Receive(&huart2, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
+          HAL_UART_Transmit(&huart2, (uint8_t *)&ch, 1, HAL_MAX_DELAY); // echo
 
-	          uint32_t meas_dur = bme68x_get_meas_dur(BME68X_FORCED_MODE, &conf, &gas_sensor);
-	          gas_sensor.delay_us(meas_dur + 10000, gas_sensor.intf_ptr); // wait a little longer than meas_dur
+          if (ch == '\r' || ch == '\n') {
+              rx_buffer[idx] = '\0';
+              break;
+          } else if (idx < sizeof(rx_buffer) - 1) {
+              rx_buffer[idx++] = ch;
+          }
+      }
 
-	          rslt = bme68x_get_data(BME68X_FORCED_MODE, data, &n_fields, &gas_sensor);
+      // Skip if empty input
+      if (strlen(rx_buffer) == 0) {
+          continue;
+      }
 
-	          if (rslt == BME68X_OK && n_fields > 0) {
-	              char buf[256];
-	              for (uint8_t i = 0; i < n_fields; i++) {
-	                  snprintf(buf, sizeof(buf),
-	                      "\r\n----------------------------------------\r\n"
-	                      "BME68x Sensor Reading [Field %d]\r\n"
-	                      "Temperature     : %6.2f \xC2\xB0C\r\n"
-	                      "Pressure        : %6.2f hPa\r\n"
-	                      "Humidity        : %6.2f %%\r\n"
-	                      "----------------------------------------\r\n",
-	                      i,
-	                      data[i].temperature,
-	                      data[i].pressure,
-	                      data[i].humidity);
-	                  HAL_UART_Transmit(&huart2, (uint8_t*)buf, strlen(buf), HAL_MAX_DELAY);
-	              }
-	          } else {
-	              char err[] = "No valid data or read error\r\n";
-	              HAL_UART_Transmit(&huart2, (uint8_t*)err, strlen(err), HAL_MAX_DELAY);
-	          }
+      // Echo received command
+      char echo[64];
+      snprintf(echo, sizeof(echo), "\r\n> Received: %s\r\n", rx_buffer);
+      HAL_UART_Transmit(&huart2, (uint8_t *)echo, strlen(echo), HAL_MAX_DELAY);
 
-	          HAL_Delay(2000);
+      // Handle special command: help
+      if (strcmp(rx_buffer, "help") == 0) {
+          HAL_UART_Transmit(&huart2, (uint8_t *)intro_msg, strlen(intro_msg), HAL_MAX_DELAY);
+          continue;
+      }
+
+      // Fetch sensor data
+      rslt = bme68x_set_op_mode(BME68X_FORCED_MODE, &gas_sensor);
+      if (rslt != BME68X_OK) {
+          HAL_UART_Transmit(&huart2, (uint8_t *)"Set op mode failed\r\n", 21, HAL_MAX_DELAY);
+          continue;
+      }
+
+      uint32_t meas_dur = bme68x_get_meas_dur(BME68X_FORCED_MODE, &conf, &gas_sensor);
+      gas_sensor.delay_us(meas_dur + 10000, gas_sensor.intf_ptr);
+
+      rslt = bme68x_get_data(BME68X_FORCED_MODE, data, &n_fields, &gas_sensor);
+
+      if (rslt == BME68X_OK && n_fields > 0) {
+          for (uint8_t i = 0; i < n_fields; i++) {
+              if (strcmp(rx_buffer, "temp") == 0) {
+                  char msg[64];
+                  snprintf(msg, sizeof(msg), "Temperature: %.2f °C\r\n", data[i].temperature);
+                  HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
+              } else if (strcmp(rx_buffer, "humi") == 0) {
+                  char msg[64];
+                  snprintf(msg, sizeof(msg), "Humidity: %.2f %%\r\n", data[i].humidity);
+                  HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
+              } else if (strcmp(rx_buffer, "press") == 0) {
+                  char msg[64];
+                  snprintf(msg, sizeof(msg), "Pressure: %.2f hPa\r\n", data[i].pressure);
+                  HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
+              } else {
+                  HAL_UART_Transmit(&huart2, (uint8_t *)"Unknown command\r\n", 18, HAL_MAX_DELAY);
+              }
+          }
+      } else {
+          HAL_UART_Transmit(&huart2, (uint8_t *)"Sensor read error or no data\r\n", 31, HAL_MAX_DELAY);
+      }
+
+      HAL_Delay(100);
   }
   /* USER CODE END 3 */
 }
@@ -373,6 +433,21 @@ static int8_t user_i2c_write(uint8_t reg_addr, const uint8_t *data, uint32_t len
     return 0;
 }
 
+void log_debug(const char *msg) {
+	bool isDebug = true;
+    char buffer[200];
+    if(isDebug)
+    {
+    	snprintf(buffer, sizeof(buffer), "[DEBUG] %s\r\n", msg);
+    	HAL_UART_Transmit(&huart2, (uint8_t *)buffer, strlen(buffer), HAL_MAX_DELAY);
+    }
+}
+
+void log_info(const char *msg) {
+    char buffer[200];
+    snprintf(buffer, sizeof(buffer), "%s\r\n", msg);
+    HAL_UART_Transmit(&huart2, (uint8_t *)buffer, strlen(buffer), HAL_MAX_DELAY);
+}
 /* USER CODE END 4 */
 
 /**
