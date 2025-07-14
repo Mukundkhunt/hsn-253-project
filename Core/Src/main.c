@@ -87,7 +87,7 @@ int main(void)
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
-  
+
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
 
@@ -168,11 +168,18 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   const char *intro_msg =
       "\r\n=== BME68x Sensor Terminal ===\r\n"
-      "Type one of the following commands and press Enter:\r\n"
-      "  temp   - Show Temperature in Celsius\r\n"
-      "  humi   - Show Humidity in %%\r\n"
-      "  press  - Show Pressure in hPa\r\n"
-      "  help   - Show this list again\r\n"
+      "Enter a command in the format:\r\n"
+      "  <duration> <mode>\r\n"
+      "Where:\r\n"
+      "  duration - Number of seconds to print (e.g., 5)\r\n"
+      "  mode     - One of the following:\r\n"
+      "             temp  - Show Temperature in Celsius\r\n"
+      "             humi  - Show Humidity in %%\r\n"
+      "             press - Show Pressure in hPa\r\n"
+      "Examples:\r\n"
+      "  10 temp   - Show temperature every second for 10 seconds\r\n"
+      "  5 humi    - Show humidity for 5 seconds\r\n"
+      "\r\nType 'help' to show this message again.\r\n"
       "===============================\r\n";
   HAL_UART_Transmit(&huart2, (uint8_t *)intro_msg, strlen(intro_msg), HAL_MAX_DELAY);
 
@@ -201,9 +208,22 @@ int main(void)
           continue;
       }
 
-      // Echo received command
+      int duration = 0;
+      char mode[16] = {0};
+
+      if (strcmp(rx_buffer, "help") == 0) {
+          HAL_UART_Transmit(&huart2, (uint8_t *)intro_msg, strlen(intro_msg), HAL_MAX_DELAY);
+          continue;
+      }
+
+      if (sscanf(rx_buffer, "%d %15s", &duration, mode) != 2) {
+          const char *msg = "Invalid format. Use: <duration> <mode>\r\n";
+          HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
+          continue;
+      }
+
       char echo[64];
-      snprintf(echo, sizeof(echo), "\r\n> Received: %s\r\n", rx_buffer);
+      snprintf(echo, sizeof(echo), "\r\n> Duration: %d sec | Mode: %s\r\n", duration, mode);
       HAL_UART_Transmit(&huart2, (uint8_t *)echo, strlen(echo), HAL_MAX_DELAY);
 
       // Handle special command: help
@@ -212,41 +232,39 @@ int main(void)
           continue;
       }
 
-      // Fetch sensor data
-      rslt = bme68x_set_op_mode(BME68X_FORCED_MODE, &gas_sensor);
-      if (rslt != BME68X_OK) {
-          HAL_UART_Transmit(&huart2, (uint8_t *)"Set op mode failed\r\n", 21, HAL_MAX_DELAY);
-          continue;
-      }
-
-      uint32_t meas_dur = bme68x_get_meas_dur(BME68X_FORCED_MODE, &conf, &gas_sensor);
-      gas_sensor.delay_us(meas_dur + 10000, gas_sensor.intf_ptr);
-
-      rslt = bme68x_get_data(BME68X_FORCED_MODE, data, &n_fields, &gas_sensor);
-
-      if (rslt == BME68X_OK && n_fields > 0) {
-          for (uint8_t i = 0; i < n_fields; i++) {
-              if (strcmp(rx_buffer, "temp") == 0) {
-                  char msg[64];
-                  snprintf(msg, sizeof(msg), "Temperature: %.2f °C\r\n", data[i].temperature);
-                  HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
-              } else if (strcmp(rx_buffer, "humi") == 0) {
-                  char msg[64];
-                  snprintf(msg, sizeof(msg), "Humidity: %.2f %%\r\n", data[i].humidity);
-                  HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
-              } else if (strcmp(rx_buffer, "press") == 0) {
-                  char msg[64];
-                  snprintf(msg, sizeof(msg), "Pressure: %.2f hPa\r\n", data[i].pressure);
-                  HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
-              } else {
-                  HAL_UART_Transmit(&huart2, (uint8_t *)"Unknown command\r\n", 18, HAL_MAX_DELAY);
-              }
+      for (int t = 0; t < duration; t++) {
+          rslt = bme68x_set_op_mode(BME68X_FORCED_MODE, &gas_sensor);
+          if (rslt != BME68X_OK) {
+              HAL_UART_Transmit(&huart2, (uint8_t *)"Set op mode failed\r\n", 21, HAL_MAX_DELAY);
+              break;
           }
-      } else {
-          HAL_UART_Transmit(&huart2, (uint8_t *)"Sensor read error or no data\r\n", 31, HAL_MAX_DELAY);
-      }
 
-      HAL_Delay(100);
+          uint32_t meas_dur = bme68x_get_meas_dur(BME68X_FORCED_MODE, &conf, &gas_sensor);
+          gas_sensor.delay_us(meas_dur + 10000, gas_sensor.intf_ptr);
+
+          rslt = bme68x_get_data(BME68X_FORCED_MODE, data, &n_fields, &gas_sensor);
+
+          if (rslt == BME68X_OK && n_fields > 0) {
+              for (uint8_t i = 0; i < n_fields; i++) {
+                  char msg[64];
+                  if (strcmp(mode, "temp") == 0) {
+                      snprintf(msg, sizeof(msg), "Temperature: %.2f °C\r\n", data[i].temperature);
+                  } else if (strcmp(mode, "humi") == 0) {
+                      snprintf(msg, sizeof(msg), "Humidity: %.2f %%\r\n", data[i].humidity);
+                  } else if (strcmp(mode, "press") == 0) {
+                      snprintf(msg, sizeof(msg), "Pressure: %.2f hPa\r\n", data[i].pressure);
+                  } else {
+                      snprintf(msg, sizeof(msg), "Unknown mode: %s\r\n", mode);
+                      break;
+                  }
+                  HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
+              }
+          } else {
+              HAL_UART_Transmit(&huart2, (uint8_t *)"Sensor read error\r\n", 20, HAL_MAX_DELAY);
+          }
+
+          HAL_Delay(1000); // wait 1 second
+      }
   }
   /* USER CODE END 3 */
 }
