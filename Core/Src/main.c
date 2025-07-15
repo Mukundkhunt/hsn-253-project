@@ -17,41 +17,33 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "SX1262.h"
 #include "bme68x.h"
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
 /* USER CODE END Includes */
 
-/* Private typedef -----------------------------------------------------------*/
-/* USER CODE BEGIN PTD */
-
-/* USER CODE END PTD */
-
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
 // SX1262 LoRa HAT Pin definitions (change as per your wiring!)
-#define LORA_NSS_PORT      GPIOA
-#define LORA_NSS_PIN       GPIO_PIN_4
-#define LORA_RST_PORT      GPIOB
-#define LORA_RST_PIN       GPIO_PIN_1
-#define LORA_BUSY_PORT     GPIOB
-#define LORA_BUSY_PIN      GPIO_PIN_0
-#define LORA_DIO1_PORT     GPIOB
-#define LORA_DIO1_PIN      GPIO_PIN_2
+#define Mode_Transmit        0
+#define Mode_Receive         1
+#define LORA_NSS_PORT        GPIOA
+#define LORA_NSS_PIN         GPIO_PIN_4
+#define LORA_RST_PORT        GPIOB
+#define LORA_RST_PIN         GPIO_PIN_1
+#define LORA_BUSY_PORT       GPIOB
+#define LORA_BUSY_PIN        GPIO_PIN_0
+#define LORA_DIO1_PORT       GPIOB
+#define LORA_DIO1_PIN        GPIO_PIN_2
 
 /* USER CODE END PD */
 
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-/* USER CODE END PM */
-
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
-
 SPI_HandleTypeDef hspi1;
-
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
@@ -68,19 +60,13 @@ static int8_t user_i2c_write(uint8_t reg_addr, const uint8_t *data, uint32_t len
 static void user_delay_us(uint32_t period, void *intf_ptr);
 /* USER CODE END PV */
 
-/* Private function prototypes -----------------------------------------------*/
+/* Function Prototypes -------------------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_SPI1_Init(void);
-/* USER CODE BEGIN PFP */
 
-// --- LoRa HAT debug helpers ---
-
-/* USER CODE END PFP */
-
-/* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
 static void user_delay_us(uint32_t period, void *intf_ptr)
@@ -124,6 +110,14 @@ void log_info(const char *msg) {
     HAL_UART_Transmit(&huart2, (uint8_t *)buffer, strlen(buffer), HAL_MAX_DELAY);
 }
 
+// --- SX1262 TX Done Callback via DIO1 Interrupt ---
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    if(GPIO_Pin == LORA_DIO1_PIN) {
+        log_debug("SX1262 TX complete (DIO1 interrupt detected)");
+        // You can set a flag here for your application logic if needed
+    }
+}
 /* USER CODE END 0 */
 
 /**
@@ -132,7 +126,6 @@ void log_info(const char *msg) {
   */
 int main(void)
 {
-
   /* USER CODE BEGIN 1 */
   log_debug("System Initialization Started");
   /* USER CODE END 1 */
@@ -142,30 +135,42 @@ int main(void)
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
 
-  /* USER CODE BEGIN Init */
-
-  /* USER CODE END Init */
-
   /* Configure the system clock */
   SystemClock_Config();
-
-  /* USER CODE BEGIN SysInit */
-
-  /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   MX_I2C1_Init();
   MX_SPI1_Init();
+
   /* USER CODE BEGIN 2 */
 
+  // --- SX1262 LoRa HAT Initialization ---
+  SX1262_Get_st()->Busy_Pin  = LORA_BUSY_PIN;
+  SX1262_Get_st()->Busy_Port = LORA_BUSY_PORT;
+  SX1262_Get_st()->NSS_Pin   = LORA_NSS_PIN;
+  SX1262_Get_st()->NSS_Port  = LORA_NSS_PORT;
+  SX1262_Get_st()->Reset_Pin = LORA_RST_PIN;
+  SX1262_Get_st()->Reset_Port= LORA_RST_PORT;
+  SX1262_Get_st()->SPI = hspi1;
 
-  // --- SX1262 LoRa HAT DEBUG SEQUENCE END ---
+//  log_debug("Initializing SX1262...");
+//  SX1262_Init();
+//
+//  uint8_t status = SX1262_getstatus();
+//  char msg[64];
+//  snprintf(msg, sizeof(msg), "SX1262 status: 0x%02X\r\n", status);
+//  log_debug(msg);
+//
+//  // --- Test Transmit ---
+//  uint8_t hello[] = "HELLO";
+//  SX1262_Transmit(hello, sizeof(hello));
+//  log_debug("SX1262 transmit called (no status)");
 
   log_debug("Initializing BME68x...");
 
-  // Set up sensor interface
+  // Set up BME68x sensor interface
   gas_sensor.intf = BME68X_I2C_INTF;
   gas_sensor.read = user_i2c_read;
   gas_sensor.write = user_i2c_write;
@@ -310,6 +315,7 @@ int main(void)
     /* USER CODE BEGIN 3 */
   /* USER CODE END 3 */
 }
+
 
 /**
   * @brief System Clock Configuration
