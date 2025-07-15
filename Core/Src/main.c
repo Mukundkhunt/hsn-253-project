@@ -14,9 +14,6 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "driver_sx1262.h"
-#include "driver_sx1262_interface.h"
-
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -57,8 +54,6 @@ SPI_HandleTypeDef hspi1;
 
 UART_HandleTypeDef huart2;
 
-sx1262_handle_t sx1262;
-
 /* USER CODE BEGIN PV */
 #define BME68X_I2C_ADDR 0x77
 struct bme68x_dev gas_sensor;
@@ -83,36 +78,11 @@ static void MX_SPI1_Init(void);
 
 // --- LoRa HAT debug helpers ---
 
-void SX1262_Select()   { HAL_GPIO_WritePin(LORA_NSS_PORT, LORA_NSS_PIN, GPIO_PIN_RESET); }
-void SX1262_Unselect() { HAL_GPIO_WritePin(LORA_NSS_PORT, LORA_NSS_PIN, GPIO_PIN_SET);   }
-
-void print_pin_state(const char *pin_name, GPIO_TypeDef* port, uint16_t pin, GPIO_PinState expected, const char *when, const char *meaning_if_wrong) {
-    GPIO_PinState state = HAL_GPIO_ReadPin(port, pin);
-    char msg[128];
-    snprintf(msg, sizeof(msg), "[LORA DEBUG] %s = %s during %s%s", pin_name, state == GPIO_PIN_SET ? "HIGH" : "LOW", when,
-        (state != expected && meaning_if_wrong) ? meaning_if_wrong : "");
-    log_debug(msg);
-}
-
-void print_spi_transaction(const char *desc, uint8_t *cmd, uint8_t cmd_len, uint8_t *resp, uint8_t resp_len) {
-    char msg[128];
-    snprintf(msg, sizeof(msg), "[LORA DEBUG] SPI %s: Sent:", desc);
-    log_debug(msg);
-    for (uint8_t i = 0; i < cmd_len; i++) {
-        snprintf(msg, sizeof(msg), "  0x%02X", cmd[i]);
-        log_debug(msg);
-    }
-    snprintf(msg, sizeof(msg), "[LORA DEBUG] SPI %s: Received:", desc);
-    log_debug(msg);
-    for (uint8_t i = 0; i < resp_len; i++) {
-        snprintf(msg, sizeof(msg), "  0x%02X", resp[i]);
-        log_debug(msg);
-    }
-}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
 static void user_delay_us(uint32_t period, void *intf_ptr)
 {
     uint32_t start = HAL_GetTick();
@@ -154,12 +124,6 @@ void log_info(const char *msg) {
     HAL_UART_Transmit(&huart2, (uint8_t *)buffer, strlen(buffer), HAL_MAX_DELAY);
 }
 
-void sx1262_rx_callback(uint16_t type, uint8_t *buf, uint16_t len)
-{
-    // Optional: print debug message
-    log_debug("SX1262 RX callback triggered.");
-}
-
 /* USER CODE END 0 */
 
 /**
@@ -194,50 +158,7 @@ int main(void)
   MX_USART2_UART_Init();
   MX_I2C1_Init();
   MX_SPI1_Init();
-
-  // Initialize SX1262 driver using HAL-based interface
-  log_debug("SX1262 LoRa HAT Startup...");
-
-  // Optional: log BUSY pin state before init
-uint8_t busy = 0;
-sx1262_interface_busy_gpio_read(&busy);
-char bmsg[64];
-snprintf(bmsg, sizeof(bmsg), "BUSY pin state before init: %s", busy ? "HIGH" : "LOW");
-log_debug(bmsg);
-  // Set up SX1262 driver
-  memset(&sx1262, 0, sizeof(sx1262_handle_t));
-  sx1262.spi_init = sx1262_interface_spi_init;
-  sx1262.spi_deinit = sx1262_interface_spi_deinit;
-  sx1262.spi_write_read = sx1262_interface_spi_write_read;
-  
-  sx1262.reset_gpio_init = sx1262_interface_reset_gpio_init;
-  sx1262.reset_gpio_deinit = sx1262_interface_reset_gpio_deinit;
-  sx1262.reset_gpio_write = sx1262_interface_reset_gpio_write;
-  
-  sx1262.busy_gpio_init = sx1262_interface_busy_gpio_init;
-  sx1262.busy_gpio_deinit = sx1262_interface_busy_gpio_deinit;
-  sx1262.busy_gpio_read = sx1262_interface_busy_gpio_read;
-  
-  sx1262.delay_ms = sx1262_interface_delay_ms;
-  sx1262.debug_print = sx1262_interface_debug_print;
-  sx1262.receive_callback = sx1262_rx_callback;  // dummy callback
-  if (sx1262_init(&sx1262) != 0) {
-    log_debug("SX1262 init failed.");
-
-    // SPI test: manually send GetStatus (0xC0, 0x00)
-    uint8_t tx[2] = {0xC0, 0x00};
-    uint8_t rx[2] = {0};
-    sx1262_interface_spi_write_read(tx, 2, rx, 2);
-
-    char msg[64];
-    snprintf(msg, sizeof(msg), "Manual GET_STATUS RX: 0x%02X 0x%02X", rx[0], rx[1]);
-    log_debug(msg);
-
-     while (1);
-}
-
-log_debug("SX1262 init success.");
-  
+  /* USER CODE BEGIN 2 */
 
 
   // --- SX1262 LoRa HAT DEBUG SEQUENCE END ---
@@ -304,6 +225,7 @@ log_debug("SX1262 init success.");
        "\r\nType 'help' to show this message again.\r\n"
        "===============================\r\n";
    HAL_UART_Transmit(&huart2, (uint8_t *)intro_msg, strlen(intro_msg), HAL_MAX_DELAY);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -386,9 +308,8 @@ log_debug("SX1262 init success.");
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-}
   /* USER CODE END 3 */
-
+}
 
 /**
   * @brief System Clock Configuration
@@ -501,7 +422,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -583,26 +504,26 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(NSS_LORA_GPIO_Port, NSS_LORA_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1|GPIO_PIN_2, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : PA4 */
-  GPIO_InitStruct.Pin = GPIO_PIN_4;
+  /*Configure GPIO pin : NSS_LORA_Pin */
+  GPIO_InitStruct.Pin = NSS_LORA_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  HAL_GPIO_Init(NSS_LORA_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB0 PB2 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_2;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  /*Configure GPIO pin : DI01_LORA_Pin */
+  GPIO_InitStruct.Pin = DI01_LORA_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_Init(DI01_LORA_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PB1 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1;
+  /*Configure GPIO pins : PB1 PB2 */
+  GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_2;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
