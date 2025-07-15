@@ -22,28 +22,39 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
+#include "stm32g0xx_hal.h"
 /* USER CODE END Includes */
+
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
+
+/* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-// SX1262 LoRa HAT Pin definitions (change as per your wiring!)
-#define Mode_Transmit        0
-#define Mode_Receive         1
-#define LORA_NSS_PORT        GPIOA
-#define LORA_NSS_PIN         GPIO_PIN_4
+// SX1262 LoRa HAT Pin definitions (updated as per your wiring!)
+#define LORA_NSS_PORT        GPIOB
+#define LORA_NSS_PIN         GPIO_PIN_0
 #define LORA_RST_PORT        GPIOB
 #define LORA_RST_PIN         GPIO_PIN_1
 #define LORA_BUSY_PORT       GPIOB
-#define LORA_BUSY_PIN        GPIO_PIN_0
-#define LORA_DIO1_PORT       GPIOB
-#define LORA_DIO1_PIN        GPIO_PIN_2
+#define LORA_BUSY_PIN        GPIO_PIN_2
+#define LORA_DIO1_PORT       GPIOA
+#define LORA_DIO1_PIN        GPIO_PIN_4
 
 /* USER CODE END PD */
 
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
+
 SPI_HandleTypeDef hspi1;
+
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
@@ -60,13 +71,17 @@ static int8_t user_i2c_write(uint8_t reg_addr, const uint8_t *data, uint32_t len
 static void user_delay_us(uint32_t period, void *intf_ptr);
 /* USER CODE END PV */
 
-/* Function Prototypes -------------------------------------------------------*/
+/* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_SPI1_Init(void);
+/* USER CODE BEGIN PFP */
 
+/* USER CODE END PFP */
+
+/* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
 static void user_delay_us(uint32_t period, void *intf_ptr)
@@ -126,6 +141,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   */
 int main(void)
 {
+
   /* USER CODE BEGIN 1 */
   log_debug("System Initialization Started");
   /* USER CODE END 1 */
@@ -135,15 +151,22 @@ int main(void)
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
 
+  /* USER CODE BEGIN Init */
+
+  /* USER CODE END Init */
+
   /* Configure the system clock */
   SystemClock_Config();
+
+  /* USER CODE BEGIN SysInit */
+
+  /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   MX_I2C1_Init();
   MX_SPI1_Init();
-
   /* USER CODE BEGIN 2 */
 
   // --- SX1262 LoRa HAT Initialization ---
@@ -155,18 +178,18 @@ int main(void)
   SX1262_Get_st()->Reset_Port= LORA_RST_PORT;
   SX1262_Get_st()->SPI = hspi1;
 
-//  log_debug("Initializing SX1262...");
-//  SX1262_Init();
-//
-//  uint8_t status = SX1262_getstatus();
-//  char msg[64];
-//  snprintf(msg, sizeof(msg), "SX1262 status: 0x%02X\r\n", status);
-//  log_debug(msg);
-//
-//  // --- Test Transmit ---
-//  uint8_t hello[] = "HELLO";
-//  SX1262_Transmit(hello, sizeof(hello));
-//  log_debug("SX1262 transmit called (no status)");
+  log_debug("Initializing SX1262...");
+  SX1262_Init();
+
+  uint8_t status = SX1262_getstatus();
+  char msg[64];
+  snprintf(msg, sizeof(msg), "SX1262 status: 0x%02X\r\n", status);
+  log_debug(msg);
+
+  // --- Test Transmit ---
+  uint8_t hello[] = "HELLO";
+  SX1262_Transmit(hello, sizeof(hello));
+  log_debug("SX1262 transmit called (no status)");
 
   log_debug("Initializing BME68x...");
 
@@ -299,9 +322,14 @@ int main(void)
                       snprintf(msg, sizeof(msg), "Pressure: %.2f hPa\r\n", data[i].pressure);
                   } else {
                       snprintf(msg, sizeof(msg), "Unknown mode: %s\r\n", mode);
+                      HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
                       break;
                   }
+                  // Transmit over UART (debug/log)
                   HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
+
+                  // Transmit over LoRa
+                  SX1262_Transmit((uint8_t *)msg, strlen(msg));
               }
           } else {
               HAL_UART_Transmit(&huart2, (uint8_t *)"Sensor read error\r\n", 20, HAL_MAX_DELAY);
@@ -315,7 +343,6 @@ int main(void)
     /* USER CODE BEGIN 3 */
   /* USER CODE END 3 */
 }
-
 
 /**
   * @brief System Clock Configuration
@@ -510,26 +537,16 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(NSS_LORA_GPIO_Port, NSS_LORA_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1|GPIO_PIN_2, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : NSS_LORA_Pin */
-  GPIO_InitStruct.Pin = NSS_LORA_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(NSS_LORA_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : DI01_LORA_Pin */
-  GPIO_InitStruct.Pin = DI01_LORA_Pin;
+  // Configure DIO1_LORA (PA4) as EXTI (Interrupt) Input
+  GPIO_InitStruct.Pin = GPIO_PIN_4;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(DI01_LORA_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB1 PB2 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_2;
+  // Configure NSS_LORA (PB0), RESET (PB1), BUSY (PB2) as output
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
