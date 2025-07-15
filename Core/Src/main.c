@@ -14,6 +14,9 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "driver_sx1262.h"
+#include "driver_sx1262_interface.h"
+
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -53,6 +56,8 @@ I2C_HandleTypeDef hi2c1;
 SPI_HandleTypeDef hspi1;
 
 UART_HandleTypeDef huart2;
+
+sx1262_handle_t sx1262;
 
 /* USER CODE BEGIN PV */
 #define BME68X_I2C_ADDR 0x77
@@ -148,6 +153,13 @@ void log_info(const char *msg) {
     snprintf(buffer, sizeof(buffer), "%s\r\n", msg);
     HAL_UART_Transmit(&huart2, (uint8_t *)buffer, strlen(buffer), HAL_MAX_DELAY);
 }
+
+void sx1262_rx_callback(uint16_t type, uint8_t *buf, uint16_t len)
+{
+    // Optional: print debug message
+    log_debug("SX1262 RX callback triggered.");
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -182,91 +194,51 @@ int main(void)
   MX_USART2_UART_Init();
   MX_I2C1_Init();
   MX_SPI1_Init();
-  /* USER CODE BEGIN 2 */
-  log_debug("GPIO, USART2, I2C1 Initialized");
-  log_debug("Checking for BME68x on I2C bus...");
 
-  HAL_StatusTypeDef devReady = HAL_I2C_IsDeviceReady(&hi2c1, BME68X_I2C_ADDR << 1, 3, 100);
-  if (devReady != HAL_OK) {
-    log_debug("BME68x NOT FOUND on I2C bus. Halting.");
-    while (1);
-  } else {
-    log_debug("BME68x FOUND on I2C bus");
-  }
+  // Initialize SX1262 driver using HAL-based interface
+  log_debug("SX1262 LoRa HAT Startup...");
 
-  // --- SX1262 LoRa HAT DEBUG SEQUENCE START ---
-  log_debug("========== SX1262 LoRa HAT Initial Debug Sequence ==========");
+  // Optional: log BUSY pin state before init
+uint8_t busy = 0;
+sx1262_interface_busy_gpio_read(&busy);
+char bmsg[64];
+snprintf(bmsg, sizeof(bmsg), "BUSY pin state before init: %s", busy ? "HIGH" : "LOW");
+log_debug(bmsg);
+  // Set up SX1262 driver
+  memset(&sx1262, 0, sizeof(sx1262_handle_t));
+  sx1262.spi_init = sx1262_interface_spi_init;
+  sx1262.spi_deinit = sx1262_interface_spi_deinit;
+  sx1262.spi_write_read = sx1262_interface_spi_write_read;
+  
+  sx1262.reset_gpio_init = sx1262_interface_reset_gpio_init;
+  sx1262.reset_gpio_deinit = sx1262_interface_reset_gpio_deinit;
+  sx1262.reset_gpio_write = sx1262_interface_reset_gpio_write;
+  
+  sx1262.busy_gpio_init = sx1262_interface_busy_gpio_init;
+  sx1262.busy_gpio_deinit = sx1262_interface_busy_gpio_deinit;
+  sx1262.busy_gpio_read = sx1262_interface_busy_gpio_read;
+  
+  sx1262.delay_ms = sx1262_interface_delay_ms;
+  sx1262.debug_print = sx1262_interface_debug_print;
+  sx1262.receive_callback = sx1262_rx_callback;  // dummy callback
+  if (sx1262_init(&sx1262) != 0) {
+    log_debug("SX1262 init failed.");
 
-  log_debug("Step 1: Checking default states of control pins...");
-  print_pin_state("NSS",  LORA_NSS_PORT,  LORA_NSS_PIN, GPIO_PIN_SET,   "startup", "");
-  print_pin_state("RESET",LORA_RST_PORT,  LORA_RST_PIN, GPIO_PIN_SET,   "startup", "");
-  print_pin_state("BUSY", LORA_BUSY_PORT, LORA_BUSY_PIN, GPIO_PIN_RESET,"startup", "");
-  print_pin_state("DIO1", LORA_DIO1_PORT, LORA_DIO1_PIN, GPIO_PIN_RESET,"startup", "");
+    // SPI test: manually send GetStatus (0xC0, 0x00)
+    uint8_t tx[2] = {0xC0, 0x00};
+    uint8_t rx[2] = {0};
+    sx1262_interface_spi_write_read(tx, 2, rx, 2);
 
-  log_debug("Step 2: Resetting SX1262 (driving RESET pin LOW 20ms, then HIGH 10ms)...");
-  HAL_GPIO_WritePin(LORA_RST_PORT, LORA_RST_PIN, GPIO_PIN_RESET);
-  HAL_Delay(20);
-  print_pin_state("RESET", LORA_RST_PORT, LORA_RST_PIN, GPIO_PIN_RESET, "while held LOW", " (If still HIGH, check for wiring error or short!)");
+    char msg[64];
+    snprintf(msg, sizeof(msg), "Manual GET_STATUS RX: 0x%02X 0x%02X", rx[0], rx[1]);
+    log_debug(msg);
 
-  HAL_GPIO_WritePin(LORA_RST_PORT, LORA_RST_PIN, GPIO_PIN_SET);
-  HAL_Delay(10);
-  print_pin_state("RESET", LORA_RST_PORT, LORA_RST_PIN, GPIO_PIN_SET, "after releasing HIGH", " (If still LOW, check for wiring error!)");
+     while (1);
+}
 
-  log_debug("Step 3: Checking BUSY pin after reset. (Should go HIGH for a moment, then LOW)");
-  print_pin_state("BUSY", LORA_BUSY_PORT, LORA_BUSY_PIN, GPIO_PIN_RESET, "immediately after reset", " (If stuck HIGH, device may be unpowered or wired wrong)");
-  HAL_Delay(1);
-  if (HAL_GPIO_ReadPin(LORA_BUSY_PORT, LORA_BUSY_PIN) == GPIO_PIN_SET) {
-      log_debug("[LORA DEBUG] BUSY is HIGH: The SX1262 is busy. Wait for it to go LOW...");
-  }
-  uint32_t busy_wait_count = 0;
-  while (HAL_GPIO_ReadPin(LORA_BUSY_PORT, LORA_BUSY_PIN) == GPIO_PIN_SET) {
-      HAL_Delay(1);
-      busy_wait_count++;
-      if (busy_wait_count > 200) {
-          log_debug("[LORA DEBUG] BUSY pin did not go LOW in 200ms. POSSIBLE ISSUE: Device not connected, powered, or defective.");
-          break;
-      }
-  }
-  if (HAL_GPIO_ReadPin(LORA_BUSY_PORT, LORA_BUSY_PIN) == GPIO_PIN_RESET)
-      log_debug("[LORA DEBUG] BUSY pin is now LOW as expected.");
+log_debug("SX1262 init success.");
+  
 
-  print_pin_state("DIO1", LORA_DIO1_PORT, LORA_DIO1_PIN, GPIO_PIN_RESET, "after reset", " (Unexpected HIGH could mean floating pin or missing device)");
-
-  log_debug("Step 4: SPI check with GetStatus (0xC0 0x00)...");
-  uint8_t cmd[2] = {0xC0, 0x00};
-  uint8_t resp[1] = {0};
-  SX1262_Select();
-  HAL_StatusTypeDef txr = HAL_SPI_Transmit(&hspi1, cmd, 2, 100);
-  HAL_StatusTypeDef rxr = HAL_SPI_Receive(&hspi1, resp, 1, 100);
-  SX1262_Unselect();
-  print_spi_transaction("GetStatus", cmd, 2, resp, 1);
-
-  if (txr != HAL_OK || rxr != HAL_OK) {
-      log_debug("[LORA DEBUG] SPI HAL failed (TX or RX). POSSIBLE ISSUE: Check SPI wiring, clock, MOSI/MISO/CS lines, power.");
-  }
-  if (resp[0] == 0x00) {
-      log_debug("[LORA DEBUG] WARNING: Got 0x00 as response. This often means NO DEVICE is connected or powered, or SPI MISO is floating.");
-      log_debug("[LORA DEBUG] HINT: Check power, SPI wires, NSS/CS connection, and device orientation.");
-  } else {
-      char statusmsg[64];
-      snprintf(statusmsg, sizeof(statusmsg), "[LORA DEBUG] SX1262 status response: 0x%02X (means device is present!)", resp[0]);
-      log_debug(statusmsg);
-  }
-
-  log_debug("Step 5: Final check of all control pins (should match idle expected values).");
-  print_pin_state("NSS",  LORA_NSS_PORT,  LORA_NSS_PIN, GPIO_PIN_SET,   "final idle", "");
-  print_pin_state("RESET",LORA_RST_PORT,  LORA_RST_PIN, GPIO_PIN_SET,   "final idle", "");
-  print_pin_state("BUSY", LORA_BUSY_PORT, LORA_BUSY_PIN, GPIO_PIN_RESET,"final idle", "");
-  print_pin_state("DIO1", LORA_DIO1_PORT, LORA_DIO1_PIN, GPIO_PIN_RESET,"final idle", "");
-
-  log_debug("========== SX1262 LoRa HAT debug sequence finished ==========");
-
-  log_debug("[LORA DEBUG] If anything above looks wrong:");
-  log_debug("[LORA DEBUG] - Recheck SX1262 pinout vs your wiring");
-  log_debug("[LORA DEBUG] - Confirm 3.3V power present at device");
-  log_debug("[LORA DEBUG] - Try swapping MOSI/MISO if you get only zeros");
-  log_debug("[LORA DEBUG] - Use a multimeter to check actual pin voltages");
-  log_debug("[LORA DEBUG] - Make sure NSS/CS is pulled HIGH when idle and toggles LOW for SPI transaction");
 
   // --- SX1262 LoRa HAT DEBUG SEQUENCE END ---
 
@@ -414,7 +386,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+}
   /* USER CODE END 3 */
 
 
@@ -529,7 +501,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
