@@ -9,10 +9,6 @@
   * Copyright (c) 2025 STMicroelectronics.
   * All rights reserved.
   *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
   ******************************************************************************
   */
 /* USER CODE END Header */
@@ -35,15 +31,26 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
+// SX1262 LoRa HAT Pin definitions (change as per your wiring!)
+#define LORA_NSS_PORT      GPIOA
+#define LORA_NSS_PIN       GPIO_PIN_4
+#define LORA_RST_PORT      GPIOB
+#define LORA_RST_PIN       GPIO_PIN_1
+#define LORA_BUSY_PORT     GPIOB
+#define LORA_BUSY_PIN      GPIO_PIN_0
+#define LORA_DIO1_PORT     GPIOB
+#define LORA_DIO1_PIN      GPIO_PIN_2
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
+
+SPI_HandleTypeDef hspi1;
 
 UART_HandleTypeDef huart2;
 
@@ -66,13 +73,81 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_I2C1_Init(void);
+static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
 
+// --- LoRa HAT debug helpers ---
+
+void SX1262_Select()   { HAL_GPIO_WritePin(LORA_NSS_PORT, LORA_NSS_PIN, GPIO_PIN_RESET); }
+void SX1262_Unselect() { HAL_GPIO_WritePin(LORA_NSS_PORT, LORA_NSS_PIN, GPIO_PIN_SET);   }
+
+void print_pin_state(const char *pin_name, GPIO_TypeDef* port, uint16_t pin, GPIO_PinState expected, const char *when, const char *meaning_if_wrong) {
+    GPIO_PinState state = HAL_GPIO_ReadPin(port, pin);
+    char msg[128];
+    snprintf(msg, sizeof(msg), "[LORA DEBUG] %s = %s during %s%s", pin_name, state == GPIO_PIN_SET ? "HIGH" : "LOW", when,
+        (state != expected && meaning_if_wrong) ? meaning_if_wrong : "");
+    log_debug(msg);
+}
+
+void print_spi_transaction(const char *desc, uint8_t *cmd, uint8_t cmd_len, uint8_t *resp, uint8_t resp_len) {
+    char msg[128];
+    snprintf(msg, sizeof(msg), "[LORA DEBUG] SPI %s: Sent:", desc);
+    log_debug(msg);
+    for (uint8_t i = 0; i < cmd_len; i++) {
+        snprintf(msg, sizeof(msg), "  0x%02X", cmd[i]);
+        log_debug(msg);
+    }
+    snprintf(msg, sizeof(msg), "[LORA DEBUG] SPI %s: Received:", desc);
+    log_debug(msg);
+    for (uint8_t i = 0; i < resp_len; i++) {
+        snprintf(msg, sizeof(msg), "  0x%02X", resp[i]);
+        log_debug(msg);
+    }
+}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static void user_delay_us(uint32_t period, void *intf_ptr)
+{
+    uint32_t start = HAL_GetTick();
+    while ((HAL_GetTick() - start) * 1000 < period);
+}
 
+static int8_t user_i2c_read(uint8_t reg_addr, uint8_t *data, uint32_t len, void *intf_ptr)
+{
+    I2C_HandleTypeDef *hi2c = (I2C_HandleTypeDef *)intf_ptr;
+    if (HAL_I2C_Mem_Read(hi2c, BME68X_I2C_ADDR << 1, reg_addr, I2C_MEMADD_SIZE_8BIT, data, len, HAL_MAX_DELAY) != HAL_OK) {
+        char err[] = "I2C read failed\r\n";
+        HAL_UART_Transmit(&huart2, (uint8_t*)err, strlen(err), HAL_MAX_DELAY);
+        return -1;
+    }
+    return 0;
+}
+
+static int8_t user_i2c_write(uint8_t reg_addr, const uint8_t *data, uint32_t len, void *intf_ptr)
+{
+    I2C_HandleTypeDef *hi2c = (I2C_HandleTypeDef *)intf_ptr;
+    if (HAL_I2C_Mem_Write(hi2c, BME68X_I2C_ADDR << 1, reg_addr, I2C_MEMADD_SIZE_8BIT, (uint8_t*)data, len, HAL_MAX_DELAY) != HAL_OK)
+        return -1;
+    return 0;
+}
+
+void log_debug(const char *msg) {
+    bool isDebug = true;
+    char buffer[200];
+    if(isDebug)
+    {
+        snprintf(buffer, sizeof(buffer), "[DEBUG] %s\r\n", msg);
+        HAL_UART_Transmit(&huart2, (uint8_t *)buffer, strlen(buffer), HAL_MAX_DELAY);
+    }
+}
+
+void log_info(const char *msg) {
+    char buffer[200];
+    snprintf(buffer, sizeof(buffer), "%s\r\n", msg);
+    HAL_UART_Transmit(&huart2, (uint8_t *)buffer, strlen(buffer), HAL_MAX_DELAY);
+}
 /* USER CODE END 0 */
 
 /**
@@ -106,32 +181,110 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   MX_I2C1_Init();
+  MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
   log_debug("GPIO, USART2, I2C1 Initialized");
   log_debug("Checking for BME68x on I2C bus...");
 
   HAL_StatusTypeDef devReady = HAL_I2C_IsDeviceReady(&hi2c1, BME68X_I2C_ADDR << 1, 3, 100);
   if (devReady != HAL_OK) {
-	log_debug("BME68x NOT FOUND on I2C bus. Halting.");
-    while (1); // Block execution here
+    log_debug("BME68x NOT FOUND on I2C bus. Halting.");
+    while (1);
   } else {
     log_debug("BME68x FOUND on I2C bus");
   }
-  
+
+  // --- SX1262 LoRa HAT DEBUG SEQUENCE START ---
+  log_debug("========== SX1262 LoRa HAT Initial Debug Sequence ==========");
+
+  log_debug("Step 1: Checking default states of control pins...");
+  print_pin_state("NSS",  LORA_NSS_PORT,  LORA_NSS_PIN, GPIO_PIN_SET,   "startup", "");
+  print_pin_state("RESET",LORA_RST_PORT,  LORA_RST_PIN, GPIO_PIN_SET,   "startup", "");
+  print_pin_state("BUSY", LORA_BUSY_PORT, LORA_BUSY_PIN, GPIO_PIN_RESET,"startup", "");
+  print_pin_state("DIO1", LORA_DIO1_PORT, LORA_DIO1_PIN, GPIO_PIN_RESET,"startup", "");
+
+  log_debug("Step 2: Resetting SX1262 (driving RESET pin LOW 20ms, then HIGH 10ms)...");
+  HAL_GPIO_WritePin(LORA_RST_PORT, LORA_RST_PIN, GPIO_PIN_RESET);
+  HAL_Delay(20);
+  print_pin_state("RESET", LORA_RST_PORT, LORA_RST_PIN, GPIO_PIN_RESET, "while held LOW", " (If still HIGH, check for wiring error or short!)");
+
+  HAL_GPIO_WritePin(LORA_RST_PORT, LORA_RST_PIN, GPIO_PIN_SET);
+  HAL_Delay(10);
+  print_pin_state("RESET", LORA_RST_PORT, LORA_RST_PIN, GPIO_PIN_SET, "after releasing HIGH", " (If still LOW, check for wiring error!)");
+
+  log_debug("Step 3: Checking BUSY pin after reset. (Should go HIGH for a moment, then LOW)");
+  print_pin_state("BUSY", LORA_BUSY_PORT, LORA_BUSY_PIN, GPIO_PIN_RESET, "immediately after reset", " (If stuck HIGH, device may be unpowered or wired wrong)");
+  HAL_Delay(1);
+  if (HAL_GPIO_ReadPin(LORA_BUSY_PORT, LORA_BUSY_PIN) == GPIO_PIN_SET) {
+      log_debug("[LORA DEBUG] BUSY is HIGH: The SX1262 is busy. Wait for it to go LOW...");
+  }
+  uint32_t busy_wait_count = 0;
+  while (HAL_GPIO_ReadPin(LORA_BUSY_PORT, LORA_BUSY_PIN) == GPIO_PIN_SET) {
+      HAL_Delay(1);
+      busy_wait_count++;
+      if (busy_wait_count > 200) {
+          log_debug("[LORA DEBUG] BUSY pin did not go LOW in 200ms. POSSIBLE ISSUE: Device not connected, powered, or defective.");
+          break;
+      }
+  }
+  if (HAL_GPIO_ReadPin(LORA_BUSY_PORT, LORA_BUSY_PIN) == GPIO_PIN_RESET)
+      log_debug("[LORA DEBUG] BUSY pin is now LOW as expected.");
+
+  print_pin_state("DIO1", LORA_DIO1_PORT, LORA_DIO1_PIN, GPIO_PIN_RESET, "after reset", " (Unexpected HIGH could mean floating pin or missing device)");
+
+  log_debug("Step 4: SPI check with GetStatus (0xC0 0x00)...");
+  uint8_t cmd[2] = {0xC0, 0x00};
+  uint8_t resp[1] = {0};
+  SX1262_Select();
+  HAL_StatusTypeDef txr = HAL_SPI_Transmit(&hspi1, cmd, 2, 100);
+  HAL_StatusTypeDef rxr = HAL_SPI_Receive(&hspi1, resp, 1, 100);
+  SX1262_Unselect();
+  print_spi_transaction("GetStatus", cmd, 2, resp, 1);
+
+  if (txr != HAL_OK || rxr != HAL_OK) {
+      log_debug("[LORA DEBUG] SPI HAL failed (TX or RX). POSSIBLE ISSUE: Check SPI wiring, clock, MOSI/MISO/CS lines, power.");
+  }
+  if (resp[0] == 0x00) {
+      log_debug("[LORA DEBUG] WARNING: Got 0x00 as response. This often means NO DEVICE is connected or powered, or SPI MISO is floating.");
+      log_debug("[LORA DEBUG] HINT: Check power, SPI wires, NSS/CS connection, and device orientation.");
+  } else {
+      char statusmsg[64];
+      snprintf(statusmsg, sizeof(statusmsg), "[LORA DEBUG] SX1262 status response: 0x%02X (means device is present!)", resp[0]);
+      log_debug(statusmsg);
+  }
+
+  log_debug("Step 5: Final check of all control pins (should match idle expected values).");
+  print_pin_state("NSS",  LORA_NSS_PORT,  LORA_NSS_PIN, GPIO_PIN_SET,   "final idle", "");
+  print_pin_state("RESET",LORA_RST_PORT,  LORA_RST_PIN, GPIO_PIN_SET,   "final idle", "");
+  print_pin_state("BUSY", LORA_BUSY_PORT, LORA_BUSY_PIN, GPIO_PIN_RESET,"final idle", "");
+  print_pin_state("DIO1", LORA_DIO1_PORT, LORA_DIO1_PIN, GPIO_PIN_RESET,"final idle", "");
+
+  log_debug("========== SX1262 LoRa HAT debug sequence finished ==========");
+
+  log_debug("[LORA DEBUG] If anything above looks wrong:");
+  log_debug("[LORA DEBUG] - Recheck SX1262 pinout vs your wiring");
+  log_debug("[LORA DEBUG] - Confirm 3.3V power present at device");
+  log_debug("[LORA DEBUG] - Try swapping MOSI/MISO if you get only zeros");
+  log_debug("[LORA DEBUG] - Use a multimeter to check actual pin voltages");
+  log_debug("[LORA DEBUG] - Make sure NSS/CS is pulled HIGH when idle and toggles LOW for SPI transaction");
+
+  // --- SX1262 LoRa HAT DEBUG SEQUENCE END ---
+
+  log_debug("Initializing BME68x...");
+
   // Set up sensor interface
   gas_sensor.intf = BME68X_I2C_INTF;
   gas_sensor.read = user_i2c_read;
   gas_sensor.write = user_i2c_write;
   gas_sensor.delay_us = user_delay_us;
   gas_sensor.intf_ptr = &hi2c1;
-  
-  log_debug("Initializing BME68x...");
+
   rslt = bme68x_init(&gas_sensor);
   if (rslt != BME68X_OK) {
-	  log_debug("Sensor initialization failed. Halting.");
+      log_debug("Sensor initialization failed. Halting.");
       while (1);
   }
-  
+
   uint8_t chip_id = 0;
   rslt = bme68x_get_regs(BME68X_REG_CHIP_ID, &chip_id, 1, &gas_sensor);
   if (rslt == BME68X_OK) {
@@ -141,52 +294,50 @@ int main(void)
   } else {
       log_debug("Failed to read Chip ID");
   }
-  
+
   log_debug("Configuring BME68x sensor...");
-  
+
   // Oversampling and filter config
   conf.os_hum = BME68X_OS_2X;
   conf.os_temp = BME68X_OS_8X;
   conf.os_pres = BME68X_OS_4X;
   conf.filter = BME68X_FILTER_SIZE_3;
-  
+
   if (bme68x_set_conf(&conf, &gas_sensor) != BME68X_OK)
       log_debug("Failed to apply sensor config");
-  
+
   // Heater configuration
   heatr_conf.enable = BME68X_ENABLE;
   heatr_conf.heatr_temp = 300;
   heatr_conf.heatr_dur = 100;
-  
+
   if (bme68x_set_heatr_conf(BME68X_FORCED_MODE, &heatr_conf, &gas_sensor) != BME68X_OK)
       log_debug("Failed to apply heater config");
-  
+
   log_debug("BME68x configuration complete.");
+
+  const char *intro_msg =
+       "\r\n=== BME68x Sensor Terminal ===\r\n"
+       "Enter a command in the format:\r\n"
+       "  <duration> <mode>\r\n"
+       "Where:\r\n"
+       "  duration - Number of seconds to print (e.g., 5)\r\n"
+       "  mode     - One of the following:\r\n"
+       "             temp  - Show Temperature in Celsius\r\n"
+       "             humi  - Show Humidity in %%\r\n"
+       "             press - Show Pressure in hPa\r\n"
+       "Examples:\r\n"
+       "  10 temp   - Show temperature every second for 10 seconds\r\n"
+       "  5 humi    - Show humidity for 5 seconds\r\n"
+       "\r\nType 'help' to show this message again.\r\n"
+       "===============================\r\n";
+   HAL_UART_Transmit(&huart2, (uint8_t *)intro_msg, strlen(intro_msg), HAL_MAX_DELAY);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  const char *intro_msg =
-      "\r\n=== BME68x Sensor Terminal ===\r\n"
-      "Enter a command in the format:\r\n"
-      "  <duration> <mode>\r\n"
-      "Where:\r\n"
-      "  duration - Number of seconds to print (e.g., 5)\r\n"
-      "  mode     - One of the following:\r\n"
-      "             temp  - Show Temperature in Celsius\r\n"
-      "             humi  - Show Humidity in %%\r\n"
-      "             press - Show Pressure in hPa\r\n"
-      "Examples:\r\n"
-      "  10 temp   - Show temperature every second for 10 seconds\r\n"
-      "  5 humi    - Show humidity for 5 seconds\r\n"
-      "\r\nType 'help' to show this message again.\r\n"
-      "===============================\r\n";
-  HAL_UART_Transmit(&huart2, (uint8_t *)intro_msg, strlen(intro_msg), HAL_MAX_DELAY);
-
-  // Now enter main loop
   while (1)
   {
-      // Read user command
       char rx_buffer[32] = {0};
       uint8_t idx = 0;
       char ch;
@@ -226,12 +377,6 @@ int main(void)
       snprintf(echo, sizeof(echo), "\r\n> Duration: %d sec | Mode: %s\r\n", duration, mode);
       HAL_UART_Transmit(&huart2, (uint8_t *)echo, strlen(echo), HAL_MAX_DELAY);
 
-      // Handle special command: help
-      if (strcmp(rx_buffer, "help") == 0) {
-          HAL_UART_Transmit(&huart2, (uint8_t *)intro_msg, strlen(intro_msg), HAL_MAX_DELAY);
-          continue;
-      }
-
       for (int t = 0; t < duration; t++) {
           rslt = bme68x_set_op_mode(BME68X_FORCED_MODE, &gas_sensor);
           if (rslt != BME68X_OK) {
@@ -266,8 +411,12 @@ int main(void)
           HAL_Delay(1000); // wait 1 second
       }
   }
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
+  }
   /* USER CODE END 3 */
-}
+
 
 /**
   * @brief System Clock Configuration
@@ -358,6 +507,46 @@ static void MX_I2C1_Init(void)
 }
 
 /**
+  * @brief SPI1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI1_Init(void)
+{
+
+  /* USER CODE BEGIN SPI1_Init 0 */
+
+  /* USER CODE END SPI1_Init 0 */
+
+  /* USER CODE BEGIN SPI1_Init 1 */
+
+  /* USER CODE END SPI1_Init 1 */
+  /* SPI1 parameter configuration*/
+  hspi1.Instance = SPI1;
+  hspi1.Init.Mode = SPI_MODE_MASTER;
+  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi1.Init.NSS = SPI_NSS_SOFT;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi1.Init.CRCPolynomial = 7;
+  hspi1.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
+  hspi1.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  if (HAL_SPI_Init(&hspi1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI1_Init 2 */
+
+  /* USER CODE END SPI1_Init 2 */
+
+}
+
+/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -412,6 +601,7 @@ static void MX_USART2_UART_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
 
   /* USER CODE END MX_GPIO_Init_1 */
@@ -420,52 +610,39 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : PA4 */
+  GPIO_InitStruct.Pin = GPIO_PIN_4;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PB0 PB2 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_2;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PB1 */
+  GPIO_InitStruct.Pin = GPIO_PIN_1;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
-static void user_delay_us(uint32_t period, void *intf_ptr)
-{
-    uint32_t start = HAL_GetTick();
-    while ((HAL_GetTick() - start) * 1000 < period);
-}
 
-static int8_t user_i2c_read(uint8_t reg_addr, uint8_t *data, uint32_t len, void *intf_ptr)
-{
-    I2C_HandleTypeDef *hi2c = (I2C_HandleTypeDef *)intf_ptr;
-    if (HAL_I2C_Mem_Read(hi2c, BME68X_I2C_ADDR << 1, reg_addr, I2C_MEMADD_SIZE_8BIT, data, len, HAL_MAX_DELAY) != HAL_OK) {
-        char err[] = "I2C read failed\r\n";
-        HAL_UART_Transmit(&huart2, (uint8_t*)err, strlen(err), HAL_MAX_DELAY);
-        return -1;
-    }
-    return 0;
-}
-
-static int8_t user_i2c_write(uint8_t reg_addr, const uint8_t *data, uint32_t len, void *intf_ptr)
-{
-    I2C_HandleTypeDef *hi2c = (I2C_HandleTypeDef *)intf_ptr;
-    if (HAL_I2C_Mem_Write(hi2c, BME68X_I2C_ADDR << 1, reg_addr, I2C_MEMADD_SIZE_8BIT, (uint8_t*)data, len, HAL_MAX_DELAY) != HAL_OK)
-        return -1;
-    return 0;
-}
-
-void log_debug(const char *msg) {
-	bool isDebug = true;
-    char buffer[200];
-    if(isDebug)
-    {
-    	snprintf(buffer, sizeof(buffer), "[DEBUG] %s\r\n", msg);
-    	HAL_UART_Transmit(&huart2, (uint8_t *)buffer, strlen(buffer), HAL_MAX_DELAY);
-    }
-}
-
-void log_info(const char *msg) {
-    char buffer[200];
-    snprintf(buffer, sizeof(buffer), "%s\r\n", msg);
-    HAL_UART_Transmit(&huart2, (uint8_t *)buffer, strlen(buffer), HAL_MAX_DELAY);
-}
 /* USER CODE END 4 */
 
 /**
