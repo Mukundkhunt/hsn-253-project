@@ -238,20 +238,26 @@ int main(void)
   log_debug("BME68x configuration complete.");
 
   const char *intro_msg =
-       "\r\n=== BME68x Sensor Terminal ===\r\n"
-       "Enter a command in the format:\r\n"
-       "  <duration> <mode>\r\n"
-       "Where:\r\n"
-       "  duration - Number of seconds to print (e.g., 5)\r\n"
-       "  mode     - One of the following:\r\n"
-       "             temp  - Show Temperature in Celsius\r\n"
-       "             humi  - Show Humidity in %%\r\n"
-       "             press - Show Pressure in hPa\r\n"
-       "Examples:\r\n"
-       "  10 temp   - Show temperature every second for 10 seconds\r\n"
-       "  5 humi    - Show humidity for 5 seconds\r\n"
-       "\r\nType 'help' to show this message again.\r\n"
-       "===============================\r\n";
+    "Enter a command in the format:\r\n"
+    "\r\n=== BME68x Sensor Terminal ===\r\n"
+    "  <duration> <mode>\r\n"
+    "Where:\r\n"
+    "  duration - Number of seconds to print (e.g., 5)\r\n"
+    "  mode     - One of the following:\r\n"
+    "             temp  - Show Temperature in Celsius\r\n"
+    "             humi  - Show Humidity in %%\r\n"
+    "             press - Show Pressure in hPa\r\n"
+    "Examples:\r\n"
+    "  10 temp   - Show temperature every second for 10 seconds\r\n"
+    "  5 humi    - Show humidity for 5 seconds\r\n"
+    "\r\nArithmetic Operations:\r\n"
+    "  add a b [c ...]  - Add numbers\r\n"
+    "  sub a b [c ...]  - Subtract numbers\r\n"
+    "  mul a b [c ...]  - Multiply numbers\r\n"
+    "  div a b [c ...]  - Divide numbers (left to right)\r\n"
+    "  e.g., add 2 3 4 \r\n"
+    "\r\nType 'help' to show this message again.\r\n"
+    "===============================\r\n";
    HAL_UART_Transmit(&huart2, (uint8_t *)intro_msg, strlen(intro_msg), HAL_MAX_DELAY);
 
   /* USER CODE END 2 */
@@ -288,6 +294,51 @@ int main(void)
           HAL_UART_Transmit(&huart2, (uint8_t *)intro_msg, strlen(intro_msg), HAL_MAX_DELAY);
           continue;
       }
+
+      if (strcmp(rx_buffer, "help") == 0) {
+        HAL_UART_Transmit(&huart2, (uint8_t *)intro_msg, strlen(intro_msg), HAL_MAX_DELAY);
+        continue;
+    }
+    
+    char copy[64];
+    strncpy(copy, rx_buffer, sizeof(copy));
+    char *token = strtok(copy, " ");
+    if (!token) continue;
+    
+    char op[4];
+    strncpy(op, token, sizeof(op));
+    
+    if (strcmp(op, "add") == 0 || strcmp(op, "sub") == 0 || strcmp(op, "mul") == 0 || strcmp(op, "div") == 0) {
+        int result = 0, value;
+        bool first = true;
+        while ((token = strtok(NULL, " ")) != NULL) {
+            if (sscanf(token, "%d", &value) != 1) {
+                HAL_UART_Transmit(&huart2, (uint8_t *)"Invalid number\r\n", 17, HAL_MAX_DELAY);
+                break;
+            }
+    
+            if (first) {
+                result = value;
+                first = false;
+                continue;
+            }
+    
+            if (strcmp(op, "add") == 0) result += value;
+            else if (strcmp(op, "sub") == 0) result -= value;
+            else if (strcmp(op, "mul") == 0) result *= value;
+            else if (strcmp(op, "div") == 0) {
+                if (value == 0) {
+                    HAL_UART_Transmit(&huart2, (uint8_t *)"Divide by 0\r\n", 14, HAL_MAX_DELAY);
+                }
+                result /= value;
+            }
+        }
+    
+        char result_msg[64];
+        snprintf(result_msg, sizeof(result_msg), "Result: %d\r\n", result);
+        HAL_UART_Transmit(&huart2, (uint8_t *)result_msg, strlen(result_msg), HAL_MAX_DELAY);
+        continue;
+    }
 
       if (sscanf(rx_buffer, "%d %15s", &duration, mode) != 2) {
           const char *msg = "Invalid format. Use: <duration> <mode>\r\n";
