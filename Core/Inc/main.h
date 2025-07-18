@@ -61,6 +61,10 @@ void Error_Handler(void);
 #define DI01_LORA_GPIO_Port GPIOA
 #define NSS_LORA_Pin GPIO_PIN_0
 #define NSS_LORA_GPIO_Port GPIOB
+#define BUSY_LORA_Pin GPIO_PIN_1
+#define BUSY_LORA_GPIO_Port GPIOB
+#define RESET_LORA_Pin GPIO_PIN_10
+#define RESET_LORA_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 

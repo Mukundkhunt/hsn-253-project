@@ -503,6 +503,7 @@ typedef struct sx126x_pkt_params_lora_s
     bool                        crc_is_on;             //!< CRC activation
     bool                        invert_iq_is_on;       //!< IQ polarity setup
 } sx126x_pkt_params_lora_t;
+typedef struct sx126x_pkt_params_lora_s sx126x_pkt_params_lora_t;
 
 /**
  * @brief SX126X GFSK packet parameters structure definition

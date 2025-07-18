@@ -1,0 +1,6 @@
+../Core/Inc/debug_log.h:12:20:log_debug	1
+../Drivers/Sx1262/sx126x_hal.c:7:28:wait_on_busy	3
+../Drivers/Sx1262/sx126x_hal.c:18:21:sx126x_hal_reset	1
+../Drivers/Sx1262/sx126x_hal.c:28:21:sx126x_hal_wakeup	1
+../Drivers/Sx1262/sx126x_hal.c:39:21:sx126x_hal_write	5
+../Drivers/Sx1262/sx126x_hal.c:60:21:sx126x_hal_read	5

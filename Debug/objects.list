@@ -26,3 +26,8 @@
 "./Drivers/STM32G0xx_HAL_Driver/Src/stm32g0xx_hal_uart.o"
 "./Drivers/STM32G0xx_HAL_Driver/Src/stm32g0xx_hal_uart_ex.o"
 "./Drivers/STM32G0xx_HAL_Driver/Src/stm32g0xx_ll_rcc.o"
+"./Drivers/Sx1262/lr_fhss_mac.o"
+"./Drivers/Sx1262/sx126x.o"
+"./Drivers/Sx1262/sx126x_driver_version.o"
+"./Drivers/Sx1262/sx126x_hal.o"
+"./Drivers/Sx1262/sx126x_lr_fhss.o"
