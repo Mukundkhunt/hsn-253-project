@@ -17,18 +17,12 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-//#include "SX1262.h"
+#include "SX1262.h"
 #include "bme68x.h"
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
 #include "stm32g0xx_hal.h"
-#include "sx126x_stm32_hal.h"
-#include "sx126x.h"
-#include "sx126x_regs.h"
-#include "sx126x_hal.h"
-#include "debug_log.h"
-
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,19 +34,14 @@
 /* USER CODE BEGIN PD */
 
 // SX1262 LoRa HAT Pin definitions (updated as per your wiring!)
-#define LORA_NSS_PORT        GPIOB     // PB0
+#define LORA_NSS_PORT        GPIOB
 #define LORA_NSS_PIN         GPIO_PIN_0
-
-#define LORA_RST_PORT        GPIOB     // PB1
+#define LORA_RST_PORT        GPIOB
 #define LORA_RST_PIN         GPIO_PIN_1
-
-#define LORA_BUSY_PORT       GPIOB     // PB2
+#define LORA_BUSY_PORT       GPIOB
 #define LORA_BUSY_PIN        GPIO_PIN_2
-
-#define LORA_DIO1_PORT       GPIOA     // PA4
+#define LORA_DIO1_PORT       GPIOA
 #define LORA_DIO1_PIN        GPIO_PIN_4
-
-
 
 /* USER CODE END PD */
 
@@ -76,17 +65,7 @@ struct bme68x_heatr_conf heatr_conf;
 struct bme68x_data data[3];
 uint8_t n_fields = 0;
 int8_t rslt;
-Radio_t Radio = {
-  .hspi = &hspi1,
-  .nss_port = LORA_NSS_PORT,
-  .nss_pin  = LORA_NSS_PIN,
-  .reset_port = LORA_RST_PORT,
-  .reset_pin  = LORA_RST_PIN,
-  .busy_port  = LORA_BUSY_PORT,
-  .busy_pin   = LORA_BUSY_PIN,
-  .dio1_port  = LORA_DIO1_PORT,
-  .dio1_pin   = LORA_DIO1_PIN,
-};
+
 static int8_t user_i2c_read(uint8_t reg_addr, uint8_t *data, uint32_t len, void *intf_ptr);
 static int8_t user_i2c_write(uint8_t reg_addr, const uint8_t *data, uint32_t len, void *intf_ptr);
 static void user_delay_us(uint32_t period, void *intf_ptr);
@@ -128,6 +107,16 @@ static int8_t user_i2c_write(uint8_t reg_addr, const uint8_t *data, uint32_t len
     if (HAL_I2C_Mem_Write(hi2c, BME68X_I2C_ADDR << 1, reg_addr, I2C_MEMADD_SIZE_8BIT, (uint8_t*)data, len, HAL_MAX_DELAY) != HAL_OK)
         return -1;
     return 0;
+}
+
+void log_debug(const char *msg) {
+    bool isDebug = true;
+    char buffer[200];
+    if(isDebug)
+    {
+        snprintf(buffer, sizeof(buffer), "[DEBUG] %s\r\n", msg);
+        HAL_UART_Transmit(&huart2, (uint8_t *)buffer, strlen(buffer), HAL_MAX_DELAY);
+    }
 }
 
 void log_info(const char *msg) {
@@ -181,68 +170,27 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   // --- SX1262 LoRa HAT Initialization ---
+  SX1262_Get_st()->Busy_Pin  = LORA_BUSY_PIN;
+  SX1262_Get_st()->Busy_Port = LORA_BUSY_PORT;
+  SX1262_Get_st()->NSS_Pin   = LORA_NSS_PIN;
+  SX1262_Get_st()->NSS_Port  = LORA_NSS_PORT;
+  SX1262_Get_st()->Reset_Pin = LORA_RST_PIN;
+  SX1262_Get_st()->Reset_Port= LORA_RST_PORT;
+  SX1262_Get_st()->SPI = hspi1;
 
-//  log_debug("Initializing SX1262...");
-//  sx126x_hal_reset(&Radio);   // Reset the radio (PB10 low->high)
-//  sx126x_hal_wakeup(&Radio);  // Wake it up from sleep (NSS toggle)
-//
-//  sx126x_set_standby(&Radio, SX126X_STANDBY_CFG_RC);
-//
-//  sx126x_set_pkt_type(&Radio, SX126X_PKT_TYPE_LORA);
-//  sx126x_set_tx(&Radio, 0xFFFFFF);
-//
-//  sx126x_set_reg_mode(&Radio, SX126X_REG_MODE_LDO);
-//
-//  sx126x_set_rf_freq(&Radio, 868100000);  // frequency in Hz
-//
-//  sx126x_mod_params_lora_t modParams = {
-//      .sf = SX126X_LORA_SF7,          // Spreading Factor 7
-//      .bw = SX126X_LORA_BW_125,       // Bandwidth 125 kHz
-//      .cr = SX126X_LORA_CR_4_5,       // Coding Rate 4/5
-//      .ldro = 0                       // Low Data Rate Optimization off (SF7BW125 has short symbol time)
-//  };
-//  if (HAL_GPIO_ReadPin(LORA_BUSY_PORT, LORA_BUSY_PIN) == GPIO_PIN_SET) {
-//      log_debug("BUSY pin is stuck HIGH! SX1262 not ready");
-//  } else {
-//      log_debug("BUSY pin is LOW, continuing...");
-//      // SPI manual test to check if MISO works
-//uint8_t dummy = 0xAA;
-//uint8_t response = 0;
-//
-//HAL_GPIO_WritePin(Radio.nss_port, Radio.nss_pin, GPIO_PIN_RESET);
-//HAL_SPI_Transmit(&hspi1, &dummy, 1, HAL_MAX_DELAY);
-//HAL_SPI_Receive(&hspi1, &response, 1, 100);
-//HAL_GPIO_WritePin(Radio.nss_port, Radio.nss_pin, GPIO_PIN_SET);
-//
-//char msg[64];
-//snprintf(msg, sizeof(msg), "SPI test response: 0x%02X", response);
-//log_debug(msg);
-//
-//  }
-//  uint8_t reg;
-//uint8_t read_cmd[2] = { 0x1D, 0x00 }; // Read register 0x00 (safe test)
-//if (sx126x_hal_read(&Radio, read_cmd, 2, &reg, 1) == SX126X_HAL_STATUS_OK) {
-//    char msg[64];
-//    snprintf(msg, sizeof(msg), "Dummy Read OK: 0x%02X", reg);
-//    log_debug(msg);
-//} else {
-//    log_debug("Dummy Read Failed");
-//}
-//
-//  sx126x_pkt_params_lora_t pktParams = {
-//      .preamble_len_in_symb = 8,
-//      .header_type = SX126X_LORA_PKT_EXPLICIT,
-//      .pld_len_in_bytes = 5,
-//      .crc_is_on = true,
-//      .invert_iq_is_on = false
-//  };
-//  sx126x_set_lora_pkt_params(&Radio, &pktParams);
-//
-//  sx126x_set_tx_params(&Radio, 14, SX126X_RAMP_40_US);   // 14 dBm output, 40µs ramp (typical)
+  log_debug("Initializing SX1262...");
+  SX1262_Init();
 
+  uint8_t status = SX1262_getstatus();
+  char msg[64];
+  snprintf(msg, sizeof(msg), "SX1262 status: 0x%02X\r\n", status);
+  log_debug(msg);
 
+  // --- Test Transmit ---
+  uint8_t hello[] = "HELLO";
+  SX1262_Transmit(hello, sizeof(hello));
+  log_debug("SX1262 transmit called (no status)");
 
-  // --- SX1262 LoRa HAT Completed ---
   log_debug("Initializing BME68x...");
 
   // Set up BME68x sensor interface
@@ -402,6 +350,7 @@ int main(void)
       snprintf(echo, sizeof(echo), "\r\n> Duration: %d sec | Mode: %s\r\n", duration, mode);
       HAL_UART_Transmit(&huart2, (uint8_t *)echo, strlen(echo), HAL_MAX_DELAY);
 
+      bool dataReceived = false;
       for (int t = 0; t < duration; t++) {
           rslt = bme68x_set_op_mode(BME68X_FORCED_MODE, &gas_sensor);
           if (rslt != BME68X_OK) {
@@ -416,6 +365,7 @@ int main(void)
 
           if (rslt == BME68X_OK && n_fields > 0) {
               for (uint8_t i = 0; i < n_fields; i++) {
+                  dataReceived = true;
                   char msg[64];
                   if (strcmp(mode, "temp") == 0) {
                       snprintf(msg, sizeof(msg), "Temperature: %.2f °C\r\n", data[i].temperature);
@@ -424,21 +374,18 @@ int main(void)
                   } else if (strcmp(mode, "press") == 0) {
                       snprintf(msg, sizeof(msg), "Pressure: %.2f hPa\r\n", data[i].pressure);
                   } else {
-                      snprintf(msg, sizeof(msg), "Unknown mode: %s\r\n", mode);
-                      HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
-                      break;
+                        char err[64];
+                        snprintf(err, sizeof(err), "Unknown mode: %s\r\n", mode);
+                        HAL_UART_Transmit(&huart2, (uint8_t *)err, strlen(err), HAL_MAX_DELAY);
+                        t = duration;
                   }
                   // Transmit over UART (debug/log)
                   HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
 
                   // Transmit over LoRa
-                  void SX1262_Transmit(uint8_t* data, uint16_t len) {
-                      sx126x_write_buffer(&Radio, 0x00, data, len);
-                      sx126x_set_tx(&Radio, 5000);  // Timeout of 5 seconds
-                  }
 //                  SX1262_Transmit((uint8_t *)msg, strlen(msg));
               }
-          } else {
+          } else if(dataReceived) {
               HAL_UART_Transmit(&huart2, (uint8_t *)"Sensor read error\r\n", 20, HAL_MAX_DELAY);
           }
 
@@ -644,26 +591,20 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, NSS_LORA_Pin|RESET_LORA_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : DI01_LORA_Pin */
-  GPIO_InitStruct.Pin = DI01_LORA_Pin;
+  // Configure DIO1_LORA (PA4) as EXTI (Interrupt) Input
+  GPIO_InitStruct.Pin = GPIO_PIN_4;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(DI01_LORA_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : NSS_LORA_Pin RESET_LORA_Pin */
-  GPIO_InitStruct.Pin = NSS_LORA_Pin|RESET_LORA_Pin;
+  // Configure NSS_LORA (PB0), RESET (PB1), BUSY (PB2) as output
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : BUSY_LORA_Pin */
-  GPIO_InitStruct.Pin = BUSY_LORA_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(BUSY_LORA_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 

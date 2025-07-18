@@ -32,10 +32,8 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Drivers/STM32G0xx_HAL_Driver/Inc/stm32g0xx_hal_spi_ex.h \
  ../Drivers/STM32G0xx_HAL_Driver/Inc/stm32g0xx_hal_uart.h \
  ../Drivers/STM32G0xx_HAL_Driver/Inc/stm32g0xx_hal_uart_ex.h \
- ../Core/Inc/bme68x.h ../Core/Inc/bme68x_defs.h \
- ../Drivers/Sx1262/sx126x_stm32_hal.h ../Drivers/Sx1262/sx126x.h \
- ../Drivers/Sx1262/sx126x_regs.h ../Drivers/Sx1262/sx126x_hal.h \
- ../Core/Inc/debug_log.h
+ ../Core/Inc/SX1262.h ../Core/Inc/SX1262_Definitions.h ../Core/Inc/main.h \
+ ../Core/Inc/bme68x.h ../Core/Inc/bme68x_defs.h
 ../Core/Inc/main.h:
 ../Drivers/STM32G0xx_HAL_Driver/Inc/stm32g0xx_hal.h:
 ../Core/Inc/stm32g0xx_hal_conf.h:
@@ -70,10 +68,8 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Drivers/STM32G0xx_HAL_Driver/Inc/stm32g0xx_hal_spi_ex.h:
 ../Drivers/STM32G0xx_HAL_Driver/Inc/stm32g0xx_hal_uart.h:
 ../Drivers/STM32G0xx_HAL_Driver/Inc/stm32g0xx_hal_uart_ex.h:
+../Core/Inc/SX1262.h:
+../Core/Inc/SX1262_Definitions.h:
+../Core/Inc/main.h:
 ../Core/Inc/bme68x.h:
 ../Core/Inc/bme68x_defs.h:
-../Drivers/Sx1262/sx126x_stm32_hal.h:
-../Drivers/Sx1262/sx126x.h:
-../Drivers/Sx1262/sx126x_regs.h:
-../Drivers/Sx1262/sx126x_hal.h:
-../Core/Inc/debug_log.h:
