@@ -186,10 +186,6 @@ int main(void)
   snprintf(msg, sizeof(msg), "SX1262 status: 0x%02X\r\n", status);
   log_debug(msg);
 
-  // --- Test Transmit ---
-  uint8_t hello[] = "HELLO";
-  SX1262_Transmit(hello, sizeof(hello));
-  log_debug("SX1262 transmit called (no status)");
 
   log_debug("Initializing BME68x...");
 
@@ -238,27 +234,29 @@ int main(void)
   log_debug("BME68x configuration complete.");
 
   const char *intro_msg =
-    "Enter a command in the format:\r\n"
-    "\r\n=== BME68x Sensor Terminal ===\r\n"
-    "  <duration> <mode>\r\n"
-    "Where:\r\n"
-    "  duration - Number of seconds to print (e.g., 5)\r\n"
-    "  mode     - One of the following:\r\n"
-    "             temp  - Show Temperature in Celsius\r\n"
-    "             humi  - Show Humidity in %%\r\n"
-    "             press - Show Pressure in hPa\r\n"
-    "Examples:\r\n"
-    "  10 temp   - Show temperature every second for 10 seconds\r\n"
-    "  5 humi    - Show humidity for 5 seconds\r\n"
-    "\r\nArithmetic Operations:\r\n"
-    "  add a b [c ...]  - Add numbers\r\n"
-    "  sub a b [c ...]  - Subtract numbers\r\n"
-    "  mul a b [c ...]  - Multiply numbers\r\n"
-    "  div a b [c ...]  - Divide numbers (left to right)\r\n"
-    "  e.g., add 2 3 4 \r\n"
-    "\r\nType 'help' to show this message again.\r\n"
-    "===============================\r\n";
-   HAL_UART_Transmit(&huart2, (uint8_t *)intro_msg, strlen(intro_msg), HAL_MAX_DELAY);
+      "\r\n=== BME68x Sensor + LoRa Terminal ===\r\n"
+      "Sensor Data:\r\n"
+      "  <duration> <mode>\r\n"
+      "Where:\r\n"
+      "  duration - Number of seconds to print (e.g., 5)\r\n"
+      "  mode     - One of the following:\r\n"
+      "             temp  - Show Temperature in Celsius\r\n"
+      "             humi  - Show Humidity in %%\r\n"
+      "             press - Show Pressure in hPa\r\n"
+      "Examples:\r\n"
+      "  10 temp   - Show temperature every second for 10 seconds\r\n"
+      "  5 humi    - Show humidity for 5 seconds\r\n"
+      "\r\nLoRa Communication:\r\n"
+      "  lora <message>   - Transmit message over LoRa\r\n"
+      "  Example: lora Hello World\r\n"
+      "\r\nArithmetic Operations:\r\n"
+      "  add a b [c ...]  - Add numbers\r\n"
+      "  sub a b [c ...]  - Subtract numbers\r\n"
+      "  mul a b [c ...]  - Multiply numbers\r\n"
+      "  div a b [c ...]  - Divide numbers (left to right)\r\n"
+      "  Example: add 2 3 4\r\n"
+      "\r\nType 'help' to show this message again.\r\n"
+      "===========================================\r\n";
 
   /* USER CODE END 2 */
 
@@ -290,55 +288,70 @@ int main(void)
       int duration = 0;
       char mode[16] = {0};
 
-      if (strcmp(rx_buffer, "help") == 0) {
+      if (strcmp(rx_buffer, "help") == 0 || strcmp(rx_buffer, "start") == 0) {
           HAL_UART_Transmit(&huart2, (uint8_t *)intro_msg, strlen(intro_msg), HAL_MAX_DELAY);
           continue;
       }
+    
+      char copy[64];
+      strncpy(copy, rx_buffer, sizeof(copy) - 1);
+      copy[sizeof(copy) - 1] = '\0'; // Ensure null termination
 
-      if (strcmp(rx_buffer, "help") == 0) {
-        HAL_UART_Transmit(&huart2, (uint8_t *)intro_msg, strlen(intro_msg), HAL_MAX_DELAY);
-        continue;
-    }
-    
-    char copy[64];
-    strncpy(copy, rx_buffer, sizeof(copy));
-    char *token = strtok(copy, " ");
-    if (!token) continue;
-    
-    char op[4];
-    strncpy(op, token, sizeof(op));
-    
-    if (strcmp(op, "add") == 0 || strcmp(op, "sub") == 0 || strcmp(op, "mul") == 0 || strcmp(op, "div") == 0) {
-        int result = 0, value;
-        bool first = true;
-        while ((token = strtok(NULL, " ")) != NULL) {
-            if (sscanf(token, "%d", &value) != 1) {
-                HAL_UART_Transmit(&huart2, (uint8_t *)"Invalid number\r\n", 17, HAL_MAX_DELAY);
-                break;
-            }
-    
-            if (first) {
-                result = value;
-                first = false;
-                continue;
-            }
-    
-            if (strcmp(op, "add") == 0) result += value;
-            else if (strcmp(op, "sub") == 0) result -= value;
-            else if (strcmp(op, "mul") == 0) result *= value;
-            else if (strcmp(op, "div") == 0) {
-                if (value == 0) {
-                    HAL_UART_Transmit(&huart2, (uint8_t *)"Divide by 0\r\n", 14, HAL_MAX_DELAY);
-                }
-                result /= value;
-            }
-        }
-    
-        char result_msg[64];
-        snprintf(result_msg, sizeof(result_msg), "Result: %d\r\n", result);
-        HAL_UART_Transmit(&huart2, (uint8_t *)result_msg, strlen(result_msg), HAL_MAX_DELAY);
-        continue;
-    }
+      char *cmd = strtok(copy, " ");
+      if (!cmd) continue;
+
+      if (strcmp(cmd, "lora") == 0) {
+          char *message = strtok(NULL, "");
+          if (message && strlen(message) > 0) {
+              char info[128];
+              snprintf(info, sizeof(info),
+                  "\r\n=== LoRa Transmission ===\r\n"
+                  "Transmitting: \"%s\"\r\n"
+                  "==========================\r\n", message);
+              HAL_UART_Transmit(&huart2, (uint8_t *)info, strlen(info), HAL_MAX_DELAY);
+
+              SX1262_Transmit((uint8_t *)message, strlen(message));
+              HAL_UART_Transmit(&huart2, (uint8_t *)"LoRa TX complete.\r\n", 19, HAL_MAX_DELAY);
+          } else {
+              HAL_UART_Transmit(&huart2, (uint8_t *)"Usage: lora <message>\r\n", 24, HAL_MAX_DELAY);
+          }
+          continue;
+      }
+
+      if (strcmp(cmd, "add") == 0 || strcmp(cmd, "sub") == 0 || strcmp(cmd, "mul") == 0 || strcmp(cmd, "div") == 0) {
+          int result = 0, value;
+          bool first = true;
+          char *arg;
+          while ((arg = strtok(NULL, " ")) != NULL) {
+              if (sscanf(arg, "%d", &value) != 1) {
+                  HAL_UART_Transmit(&huart2, (uint8_t *)"Invalid number\r\n", 17, HAL_MAX_DELAY);
+                  break;
+              }
+
+              if (first) {
+                  result = value;
+                  first = false;
+                  continue;
+              }
+
+              if (strcmp(cmd, "add") == 0) result += value;
+              else if (strcmp(cmd, "sub") == 0) result -= value;
+              else if (strcmp(cmd, "mul") == 0) result *= value;
+              else if (strcmp(cmd, "div") == 0) {
+                  if (value == 0) {
+                      HAL_UART_Transmit(&huart2, (uint8_t *)"Divide by 0\r\n", 14, HAL_MAX_DELAY);
+                      break;
+                  }
+                  result /= value;
+              }
+          }
+
+          char result_msg[64];
+          snprintf(result_msg, sizeof(result_msg), "Result: %d\r\n", result);
+          HAL_UART_Transmit(&huart2, (uint8_t *)result_msg, strlen(result_msg), HAL_MAX_DELAY);
+          continue;
+      }
+
 
       if (sscanf(rx_buffer, "%d %15s", &duration, mode) != 2) {
           const char *msg = "Invalid format. Use: <duration> <mode>\r\n";
