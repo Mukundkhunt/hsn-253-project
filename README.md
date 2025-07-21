@@ -105,7 +105,7 @@ You can now send custom LoRa messages using the `lora` command.
 
 ## Demo Video
 
-<video src="test/test_terminal.mov" controls width="600">Your browser does not support the video tag. You can download the video file to view it.</video>
+👉 [Click here to watch the demo video](https://mukund-personal-storage.s3.ap-south-1.amazonaws.com/test_terminal.mp4)
 
 ## Team
 
